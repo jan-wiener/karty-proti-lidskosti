@@ -2,6 +2,7 @@ import socket
 import json
 import struct
 import uuid
+import threading
 
 #SERVER_IP = 'localhost'  # replace with IP
 #PORT = 12345
@@ -12,14 +13,17 @@ import uuid
 class Client(): #AI
 
     handlers = {}
-    def __init__(self, name, SERVER_IP, PORT, autostart = True):
+    def __init__(self, name, SERVER_IP = "localhost", PORT = 12345, autostart = True, force_console = False):
+        self.force_console = force_console
         self.SERVER_IP = SERVER_IP
         self.PORT = PORT
         self.name= name
         self._register_handlers()
         self.connected = False
         if autostart:
-            self.client_start()
+            client_thread = threading.Thread(target=self.client_start)
+            client_thread.start()
+            # self.client_start()
     
 
     def send_packet(self, data):
@@ -63,22 +67,22 @@ class Client(): #AI
             self.log_in()
 
             while True:
-                try:
-                    packet = self.recv_packet(self.sock)
-                    if packet:
-                        print("Received:", packet)
-                        self.last_packet = packet
-                        packet_type = packet["type"]
-                        data = packet["data"]
-                        if handler := self.handlers[packet_type]:
-                            handler(data)
-                    else:
-                        print("Server closed the connection.")
-                        break
-                except Exception as e:
-                    self.connected = False
-                    print("Error:", e)
-                    break        
+                # try:
+                packet = self.recv_packet(self.sock)
+                if packet:
+                    print("Received:", packet)
+                    self.last_packet = packet
+                    packet_type = packet["type"]
+                    data = packet["data"]
+                    if handler := self.handlers[packet_type]:
+                        handler(data)
+                else:
+                    print("Server closed the connection.")
+                    break
+                # except Exception as e:
+                #     self.connected = False
+                #     print("Error:", e)
+                #     break        
 
     
     def packet_handler(packet_type):
@@ -109,6 +113,7 @@ class Client(): #AI
     @packet_handler("round_info")
     def recv_round_info(self, data):
         self.current_black_card = data["black"]
+        self.answers = self.current_black_card["answers"]
         print(f"Current black card: {self.current_black_card["text"]}")
         if data["tsar"]:
             self.is_tsar = True
@@ -118,16 +123,24 @@ class Client(): #AI
             cards = data["cards"]
             self.hand = {i: cards[i] for i in range(len(cards))}
 
+
+            if not self.force_console: return
             # ------------------------------------Terminal access
             print(f"Pick a card!")
+            crds = []
+            
             for i in self.hand:
                 card = self.hand[i]
                 print(f"Card {i}: {card["text"]} ({card["help"]})")
-            picked = int(input("picked (index): "))
-            picked = self.hand[picked]
-            if not picked["text"]:
-                picked["text"] = input("Enter card text: ")
-            self.submit_white(picked["uuid"], picked["text"])
+            for i in range(self.answers):
+
+                picked = int(input(f"picked (index) [{i}]: "))
+                picked = self.hand[picked]
+                if not picked["text"]:
+                    picked["text"] = input("Enter card text: ")
+
+                crds.append({"uuid": picked["uuid"], "custom_text": picked["text"]})
+            self.submit_white(crds)
 
         #for i in range(len(cards)):
         #    self.hand[i] = cards[i]
@@ -135,21 +148,32 @@ class Client(): #AI
     
     @packet_handler("rate_info")
     def recv_rate_info(self, data):
-        cards = data["cards"]
-        self.cards_to_rate = {i: cards[i] for i in range(len(cards))}
+        # cards = data
+        # self.cards_to_rate = {i: cards[i] for i in range(len(cards))}
+        self.cards_to_rate = data
 
+        self.uuiddict = {i: v for i, v in enumerate(list(self.cards_to_rate.keys()))}
+        # self.cards_indexed = {i: {self.cards_to_rate[v]} for i, v in enumerate(list(self.cards_to_rate.keys()))}
+        self.cards_indexed = {}
+        for i, uuid in enumerate(self.cards_to_rate):
+            self.cards_indexed[i] = self.cards_to_rate[uuid]
+        # {playeruuid: {i: cardinfo, ...}, ...}
+
+
+        if not self.force_console: return
         # ------------------------------------Terminal access
         print(f"Submitted cards:")
-        for i in self.cards_to_rate:
-            card = self.cards_to_rate[i]
-            print(f"Card {i}: {card["text"]} ({card["help"]})")
+        for i in self.cards_indexed:
+            cards = self.cards_indexed[i]
+            for cardid in cards:
+                crd = cards[cardid]
+                print(f"Card set {i} card {cardid}: {crd["text"]} ({crd["help"]})")
 
         if self.is_tsar:
-            print(f"You are the tsar! Pick a card!")
+            print(f"You are the tsar! Pick a set!")
         
             picked = int(input("picked (index): "))
-            picked = self.cards_to_rate[picked]
-            self.submit_rate(picked["uuid"])
+            self.submit_rate(self.uuiddict[picked])
         else:
             print(f"Wait for the tsar to pick a card")
 
@@ -157,16 +181,16 @@ class Client(): #AI
     @packet_handler("round_winner")
     def recv_round_winner(self, data):
         self.round_winner = data["winner"]
-        self.winning_card = data["card"]
+        self.round_winner_uuid = data["uuid"]
+        # self.winning_card = data["card"]
 
         # ------------------------------------Terminal access
-        print(f"Player {self.round_winner} won this round with his card\n{self.winning_card["text"]} ({self.winning_card["help"]})")
+        print(f"Player {self.round_winner} won this round ")
 
     
     @packet_handler("game_end")
     def recv_game_end(self, data):
         self.winner = data["winner"]
-        
 
         # ------------------------------------Terminal access
         print(f"-----\nPlayer {self.winner} won the game !!\n")
@@ -184,28 +208,29 @@ class Client(): #AI
 
 
     
-    def submit_white(self, carduuid, custom_text = ""):
-        self.send_packet({"type": "submit_white", "data": {"uuid": carduuid, "custom_text": custom_text}})
+    def submit_white(self, cards, custom_text = ""): # cards = [{"uuid": uuid, "custom_text": custom_text}]
+        data = {"cards": {i: v for i,v in enumerate(cards)}}
+        self.send_packet({"type": "submit_white", "data": data})
+        #self.send_packet({"type": "submit_white", "data": {"uuid": carduuid, "custom_text": custom_text}})
     
-    def submit_rate(self, carduuid):
-        self.send_packet({"type": "submit_rate", "data": {"uuid": carduuid}})
+    def submit_rate(self, playeruuid):
+        self.send_packet({"type": "submit_rate", "data": {"uuid": playeruuid}})
 
 
 
     
+if __name__ == "__main__":
+    name = input("Enter player name: ")
+    try:
+        client = Client(name=name)
+    except Exception as e:
+        print(e)
+        exit()
 
 
-name = input("Enter player name: ")
-try:
-    client = Client(name=name)
-except Exception as e:
-    print(e)
-    exit()
 
 
+    import time
 
-
-import time
-
-while True:
-    time.sleep(1)
+    while True:
+        time.sleep(1)

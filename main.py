@@ -30,11 +30,13 @@ class Player():
 
 global_card_db = {}
 class Card():
-    def __init__(self, text, color = False, help: str = ""): #False color = white, True = black
+    def __init__(self, text, color = False, help: str = "", answers = 1): #False color = white, True = black
         global global_card_db
         self.text = text
         self.help = help
         self.color = color
+        
+        self.answers = answers
 
         self.uuid = uuid.uuid4()
         self.uuid = str(self.uuid) # for convenience
@@ -46,9 +48,9 @@ class Card():
 
 
 
-black_cards = [Card(f"jews{i}", True, "Blackhelp") for i in range(20)]
-white_cards = [Card(f"jews{i}", False, "Whitehelp") for i in range(10)]
-white_cards = white_cards + [Card("", False) for _ in range(20)]
+black_cards = [Card(f"jews{i}", True, "Blackhelp", answers=2) for i in range(20)]
+white_cards = [Card(f"jews{i}", False, "Whitehelp") for i in range(30)]
+#white_cards = white_cards + [Card("", False) for _ in range(20)]
 
 import socket
 import json
@@ -301,25 +303,29 @@ class Server(): #AI
 
     @packet_handler("submit_white")
     def submit_card(self, data, conn, addr):
-        card_uuid = data["uuid"]
-        card = global_card_db[card_uuid]
-        #player = data["player"]
+        card_data = data["cards"]
         player = global_addr_db[addr]
-        custom_text = data["custom_text"]
+        card_dict = {}
+        for i in card_data:
+            card = global_card_db[card_data[i]["uuid"]]
+            card_dict[i] = card
+            
+            custom_text = card_data[i]["custom_text"]
 
-        if card not in player.hand or player.played_move or player is self.tsar: 
-            print(f"NOT FATAL: Can't submit card, stolen card: {card not in player.hand}, has played: {player.played_move}, is tsar: {self.tsar == player}")
-            return None
-        
-        
-        if not card.text:
-            card.text = custom_text
+            if card not in player.hand or player.played_move or player is self.tsar: 
+                print(f"NOT FATAL: Can't submit card, stolen card: {card not in player.hand}, has played: {player.played_move}, is tsar: {self.tsar == player}")
+                return None
 
 
-        self.submitted_cards[player.uuid] = card
-        player.hand.remove(card)
+            if not card.text:
+                card.text = custom_text
+
+
+            
+            player.hand.remove(card)
+            print(f"player {player.name} submitted card {card.text}")
         player.played_move = True
-        print(f"player {player.name} submitted card {card.text}")
+        self.submitted_cards[player.uuid] = card_dict
 
 
 
@@ -338,16 +344,12 @@ class Server(): #AI
 
     @packet_handler("submit_rate")
     def rate(self, data, conn, addr):
-        card_uuid = data["uuid"]
-        card = global_card_db[card_uuid]
+        player_uuid = data["uuid"]
+
         #player = data["player"]
         sender = global_addr_db[addr]
 
-        player = None
-        for player_uuid in self.submitted_cards:
-            c = self.submitted_cards[player_uuid]
-            if c is card:
-                player = self.players[player_uuid]
+        player = self.players[player_uuid]
 
 
         # tsar has to pick a card
@@ -359,8 +361,7 @@ class Server(): #AI
 
         self.round_winner = player
         self.add_score(self.round_winner)
-        print(f"player {player.name} rated card {card.text}")
-        self.winning_card = card
+        self.winning_card = self.submitted_cards[player_uuid]
         return player
     
     def broadcast_round_info(self): # can/should be made individual access, for client calls
@@ -371,26 +372,32 @@ class Server(): #AI
             print(f"-broadcasting to {player.name}")
             if player is self.tsar:
                 #data = {"cards": [], "black": self.current_black_card, "tsar": True}
-                data.update({"cards": [], "black": {"text": self.current_black_card.text, "help": self.current_black_card.help}, "tsar": True})
+                data.update({"cards": [], "black": {"text": self.current_black_card.text, "help": self.current_black_card.help, "answers": self.current_black_card.answers}, "tsar": True})
                 self.send_packet(player.conn, {"type": "round_info", "data": data})
             else:
                 card_data = [{"text": card.text, "help": card.help, "uuid": card.uuid} for card in player.hand]
                 #data = {"cards": card_data, "black": self.current_black_card, "tsar": False}
-                data.update({"cards": card_data, "black": {"text": self.current_black_card.text, "help": self.current_black_card.help}, "tsar": False})
+                data.update({"cards": card_data, "black": {"text": self.current_black_card.text, "help": self.current_black_card.help, "answers": self.current_black_card.answers}, "tsar": False})
                 self.send_packet(player.conn, {"type": "round_info", "data": data})
         print(f"Finished broadcasting round info")
         
     
     def broadcast_rate_info(self):
         print(f"broadcasting rate info")
-        card_data = [{"text": card.text, "help": card.help, "uuid": card.uuid} for card in self.submitted_cards.values()]
-        self.broadcast({"type": "rate_info", "data": {"cards": card_data}})
+        # {i: {cardinfo}}
+        #card_data = [{i: {"text": card.text, "help": card.help, "uuid": card.uuid}} for i, card in enumerate(self.submitted_cards.values())]
+        card_data = {}
+        for player_id in self.submitted_cards:
+            card_data[player_id] = {}
+            for card_id in self.submitted_cards[player_id]:
+                card = self.submitted_cards[player_id][card_id]
+                card_data[player_id][card_id] = {"text": card.text, "help": card.help, "uuid": card.uuid}
+
+        self.broadcast({"type": "rate_info", "data": card_data})
 
 
     def round(self):
         self.rounds = self.rounds + 1
-
-
 
 
         # ----------------------------------------------------TSAR PICK
@@ -419,7 +426,7 @@ class Server(): #AI
             #print(f"awaiting Cards, submitted cards: {self.submitted_cards}")
             time.sleep(1)
 
-        if len(self.players) < 2: raise "Not enough players"
+        if len(self.players) < 2: raise Exception("Not enough players")
 
         # ----------------------------------------------------RATE PHASE
         print(f"cards submitted!")
@@ -435,7 +442,7 @@ class Server(): #AI
         # ----------------------------------------------------ANNOUNCE ROUND WINNERS
         print(f"{self.round_winner.name} won this round")
         print(f"broadcasting round winner")
-        self.broadcast({"type": "round_winner", "data": {"winner": self.round_winner.name, "card": {"text": self.winning_card.text, "help": self.winning_card.help}}}) # , "winner_uuid": self.round_winner.uuid
+        self.broadcast({"type": "round_winner", "data": {"winner": self.round_winner.name, "uuid": self.round_winner.uuid}}) # , "winner_uuid": self.round_winner.uuid
 
         for player in self.players.values(): #----RESET MOVES
             player.played_move = False
