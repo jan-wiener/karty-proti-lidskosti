@@ -7,7 +7,7 @@ import uuid
 
 global_players = {}
 
-
+global_addr_db = {}
 class Player():
     def __init__(self, name, ip):
         self.name = name
@@ -15,6 +15,8 @@ class Player():
         self.uuid = uuid.uuid4()
         self.uuid = str(self.uuid) # convert to string, for convenience
         global_players[self.uuid] = self
+        self.conn = None
+        self.addr = None
 
         self.reset()
 
@@ -38,12 +40,15 @@ class Card():
         self.uuid = str(self.uuid) # for convenience
         global_card_db[self.uuid] = self
 
+        self.blank = not self.text # if no text; = True; else; = False
 
 
 
 
-black_cards = [f"Hey, ___{i}" for i in range(20)]
-white_cards = [Card(f"jews{i}", False, "Nigga") for i in range(22)]
+
+black_cards = [Card(f"jews{i}", True, "Blackhelp") for i in range(20)]
+white_cards = [Card(f"jews{i}", False, "Whitehelp") for i in range(10)]
+white_cards = white_cards + [Card("", False) for _ in range(20)]
 
 import socket
 import json
@@ -53,23 +58,26 @@ import uuid
 class Server(): #AI
 
     clients = [] 
-
+    handlers = {}
     def __init__(self, host: str = "0.0.0.0", port: int = 12345, autostart: bool = True, max_points = 7, black_cards = [], white_cards = [], max_cards = 8, deck_rules = False, hand_duplicate = False):
         self.change_settings(max_points, black_cards, white_cards, max_cards, deck_rules, hand_duplicate)
         self.started = False
-        self.conn = None
+        
+        self.scoreboard = {} #playeruuid: score
 
         self._register_handlers()
         
-        self.players = {} #id: playerobj
-        self.uuids = {} #seshuuid: playerobj
+        
+        self.players = {} #playeruuid: playerobj
+        self.uuids = {} #playeruuid: name
 
         self.HOST = host
         self.PORT = port
 
         if autostart:
-            conn_init_thread = threading.Thread(target=self.start_server)
+            conn_init_thread = threading.Thread(target=self.start_server, daemon=True)
             conn_init_thread.start()
+
             #self.start_server()
         
         # call self.game_start() to start the game loop
@@ -127,15 +135,27 @@ class Server(): #AI
                 
 
                 # Echo back or broadcast to all clients
-                response = {"type": "echo", "data": packet}
-                self.send_packet(conn, response)
+                #response = {"type": "echo", "data": packet}
+                #self.send_packet(conn, response)
 
         except Exception as e:
             print(f"[{addr}] Error:", e)
         finally:
             print(f"[-] Client disconnected: {addr}")
+            self.remove_player(global_addr_db[addr]) # removes player obj and references
             self.clients.remove(conn)
             conn.close()
+
+    def remove_player(self, player): 
+        global global_addr_db # removes player obj and references
+        self.uuids.pop(player.uuid)
+        self.players.pop(player.uuid)
+        self.scoreboard.pop(player.uuid)
+        print(global_addr_db)
+        global_addr_db.pop(player.addr)
+        del player
+        
+
 
     def start_server(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
@@ -251,6 +271,7 @@ class Server(): #AI
         random.shuffle(self.black_cards)
         random.shuffle(self.white_cards)
 
+
     @packet_handler("log_in")
     def log_in(self, data, conn, addr):
         ip = addr[0] ###################################
@@ -258,10 +279,20 @@ class Server(): #AI
 
         new_player = Player(name, ip)
         self.players[new_player.uuid] = new_player
+        global_addr_db[addr] = new_player
+
         new_player.conn = conn
+        new_player.addr = addr
+
+        self.scoreboard[new_player.uuid] = 0
+        self.uuids[new_player.uuid] = new_player.name
 
         self.send_packet(conn, {"type": "game_info", "data": self.game_info})
-        self.send_packet(conn, {"type": "uuid_echo", "data": {"uuid": new_player.uuid}})
+        #self.send_packet(conn, {"type": "uuid_echo", "data": {"uuid": new_player.uuid}})
+
+        print(f"player {new_player.name} joined! {addr}")
+
+
 
         #self.send_packet(conn, {"type": "player_info", "data": None}) #send player ifno WIP
 
@@ -269,68 +300,107 @@ class Server(): #AI
 
 
     @packet_handler("submit_white")
-    def submit_card(self, data):
-        card = data["card"]
-        player = data["player"]
+    def submit_card(self, data, conn, addr):
+        card_uuid = data["uuid"]
+        card = global_card_db[card_uuid]
+        #player = data["player"]
+        player = global_addr_db[addr]
+        custom_text = data["custom_text"]
 
         if card not in player.hand or player.played_move or player is self.tsar: 
             print(f"NOT FATAL: Can't submit card, stolen card: {card not in player.hand}, has played: {player.played_move}, is tsar: {self.tsar == player}")
             return None
+        
+        
+        if not card.text:
+            card.text = custom_text
+
 
         self.submitted_cards[player.uuid] = card
         player.hand.remove(card)
         player.played_move = True
+        print(f"player {player.name} submitted card {card.text}")
 
 
 
     def get_winner(self):
+        winner = None
         for player in self.players.values():
             if player.score >= self.max_points:
-                return player
-        return None
+                winner = player
+        
+        return winner
+    
+    def add_score(self, player):
+        player.score = player.score + 1
+        self.scoreboard[player.uuid] = player.score
+
 
     @packet_handler("submit_rate")
-    def rate(self, data):
-        player = data["player"]
+    def rate(self, data, conn, addr):
+        card_uuid = data["uuid"]
+        card = global_card_db[card_uuid]
+        #player = data["player"]
+        sender = global_addr_db[addr]
+
+        player = None
+        for player_uuid in self.submitted_cards:
+            c = self.submitted_cards[player_uuid]
+            if c is card:
+                player = self.players[player_uuid]
+
+
         # tsar has to pick a card
-        if self.tsar == player or not self.submitted_cards: 
-            print(F"NOT FATAL: tsar {player.name}? picked himself; OR it wasn't rating phase")
-            return None #cant pick himself
+        if self.tsar is not sender or not self.submitted_cards: 
+            print(F"NOT FATAL: player {sender.name} is not the tsar; OR it wasn't rating phase")
+            return None
+        elif not player:
+            raise "FATAL: Player not found"
 
         self.round_winner = player
-        self.round_winner.score = self.round_winner.score + 1
+        self.add_score(self.round_winner)
+        print(f"player {player.name} rated card {card.text}")
+        self.winning_card = card
         return player
     
     def broadcast_round_info(self): # can/should be made individual access, for client calls
+        data = {"scoreboard": self.scoreboard, "uuids": self.uuids}
+
+        print(f"Broadcasting round info")
         for player in self.players.values(): 
+            print(f"-broadcasting to {player.name}")
             if player is self.tsar:
-                self.send_packet(player.conn, {"type": "round_info", "data": {"cards": [], "black": self.current_black_card, "tsar": True}})
+                #data = {"cards": [], "black": self.current_black_card, "tsar": True}
+                data.update({"cards": [], "black": {"text": self.current_black_card.text, "help": self.current_black_card.help}, "tsar": True})
+                self.send_packet(player.conn, {"type": "round_info", "data": data})
             else:
                 card_data = [{"text": card.text, "help": card.help, "uuid": card.uuid} for card in player.hand]
-                self.send_packet(player.conn, {"type": "round_info", "data": {"cards": card_data, "black": self.current_black_card, "tsar": False}})
+                #data = {"cards": card_data, "black": self.current_black_card, "tsar": False}
+                data.update({"cards": card_data, "black": {"text": self.current_black_card.text, "help": self.current_black_card.help}, "tsar": False})
+                self.send_packet(player.conn, {"type": "round_info", "data": data})
+        print(f"Finished broadcasting round info")
+        
     
     def broadcast_rate_info(self):
-        cards = list(self.submitted_cards.keys())
-        card_data = [{"text": card.text, "help": card.help, "uuid": card.uuid} for card in cards]
+        print(f"broadcasting rate info")
+        card_data = [{"text": card.text, "help": card.help, "uuid": card.uuid} for card in self.submitted_cards.values()]
         self.broadcast({"type": "rate_info", "data": {"cards": card_data}})
 
 
     def round(self):
         self.rounds = self.rounds + 1
 
-        for i in global_players[1].hand:             ###TESTING
-            print(f"{i.text} {i.help} {i.color}")    ###---
-        
-        # print(F"testing")
-        # self.game_start()
 
 
-        #pick a tsar
+
+        # ----------------------------------------------------TSAR PICK
         #print([i.name for i in list(self.players.values())])
+        print(self.players)
         self.tsar = list(self.players.values())[list(self.players.values()).index(self.tsar)+1 if list(self.players.values()).index(self.tsar)+1 < len(self.players) else 0]
         self.current_black_card = random.choice(self.black_cards)
 
-        for player in self.players.values(): #give cards
+        # ----------------------------------------------------GIVE CARDS
+        for player in self.players.values(): 
             while len(player.hand) < self.max_cards:
                 self.give_card(player)
         
@@ -340,7 +410,7 @@ class Server(): #AI
         print(f"Round no. {self.rounds}")
         print(f"{self.tsar.name} is the tsar!")
 
-
+        # ----------------------------------------------------ROUND PHASE
 
         self.submitted_cards = {} # player: card
 
@@ -348,9 +418,11 @@ class Server(): #AI
         while len(self.submitted_cards) < len(self.players)-1: #-1 for tsar
             #print(f"awaiting Cards, submitted cards: {self.submitted_cards}")
             time.sleep(1)
-        print(f"cards submitted!")
-        
 
+        if len(self.players) < 2: raise "Not enough players"
+
+        # ----------------------------------------------------RATE PHASE
+        print(f"cards submitted!")
         print(self.submitted_cards)
 
         self.broadcast_rate_info() #--------------- call TCP
@@ -360,15 +432,22 @@ class Server(): #AI
         while not self.round_winner:
             time.sleep(1)
 
+        # ----------------------------------------------------ANNOUNCE ROUND WINNERS
         print(f"{self.round_winner.name} won this round")
+        print(f"broadcasting round winner")
+        self.broadcast({"type": "round_winner", "data": {"winner": self.round_winner.name, "card": {"text": self.winning_card.text, "help": self.winning_card.help}}}) # , "winner_uuid": self.round_winner.uuid
 
-        for player in self.players.values():
+        for player in self.players.values(): #----RESET MOVES
             player.played_move = False
 
         time.sleep(1)
 
+        # ---------------------------------------------------- CALL FOR WINNER
         if winner := self.get_winner():
             print(f"Player {winner.name} won the Game!")
+
+            print(f"broadcasting game winner")
+            self.broadcast({"type": "game_end", "data": {"winner": winner.name}}) # , "winner_uuid": winner.uuid
             return winner
         return self.round()
     
@@ -382,10 +461,16 @@ class Server(): #AI
 
 if __name__ == "__main__":
 
-    game = Server()
+    game = Server(black_cards=black_cards, white_cards=white_cards)
 
 
+    print("Hey")
 
+    while len(game.players) < 2:
+        time.sleep(1)
+        #print(game.players)
+        #print(global_addr_db)
+    game.game_start()
 
 
 
