@@ -12,7 +12,7 @@ from PyQt6.QtGui import (
     QIcon
 )
 from PyQt6.QtCore import QSize
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 import sys
 
 
@@ -46,8 +46,10 @@ class MainWindow(QWidget):
         layout = QVBoxLayout()
         # Add scoreboard
 
-
-
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.tick)
+        self.timer.start(1000)
+        print(f"--------")
         #-----------------------------------------------
         self.scoreboard = QLabel("Score: --")
 
@@ -154,8 +156,8 @@ class MainWindow(QWidget):
         self.hand = {0: {"text": "the black ones the black ones the black ones", "custom_text": ""}, 1: {"text": "Chuck Norris", "custom_text": ""}}
         self.set_cards(self.hand)
 
-        black_card = {"text": "I hate ____"}
-        self.set_black_card(black_card)
+        self.current_black_card = {"text": "I hate ____"}
+        self.set_black_card(self.current_black_card)
         # Later, you could call:
 
 
@@ -255,6 +257,7 @@ class MainWindow(QWidget):
                 widget.deleteLater()   
     
     def tick(self):
+        print("Tick")
         if not len(self.selected_cards):
             self.no_selected.setVisible(True)
             self.send_button.setVisible(False)
@@ -267,10 +270,19 @@ class MainWindow(QWidget):
         else:
             self.no_cards_in_hand.setVisible(False)
 
+        
         #--Client
-        # if self.client.hand != self.hand:
-        #     self.hand = self.client.hand
-        #     self.set_cards(self.hand)
+        if self.client.hand != self.hand:
+            self.hand = self.client.hand
+            self.set_cards(self.hand)
+        
+        if self.current_black_card != self.client.current_black_card:
+            self.current_black_card = self.client.current_black_card
+            self.set_black_card(self.current_black_card)
+        
+        
+        
+
 
 
 
@@ -297,8 +309,9 @@ class Client(): #AI
 
     handlers = {}
     def __init__(self, name, ui, SERVER_IP = "localhost", PORT = 12345, autostart = True, force_console = False):
+        self.current_black_card = {"text": "I hate ____"}
         self.answers = 1
-        self.hand = None
+        self.hand = {0: {"text": "the black ones the black ones the black ones", "custom_text": ""}, 1: {"text": "Chuck Norris", "custom_text": ""}} #testing hdand
         self.ui = ui
         self.force_console = force_console
         self.SERVER_IP = SERVER_IP
