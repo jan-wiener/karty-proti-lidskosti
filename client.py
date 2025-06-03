@@ -139,7 +139,7 @@ class Client(): #AI
                 if not picked["text"]:
                     picked["text"] = input("Enter card text: ")
 
-                crds.append({"uuid": picked["uuid"], "custom_text": picked["text"]})
+                crds.append({"uuid": picked["uuid"], "text": picked["text"]})
             self.submit_white(crds)
 
         #for i in range(len(cards)):
@@ -220,9 +220,9 @@ class Client(): #AI
 
     
 if __name__ == "__main__":
-    name = input("Enter player name: ")
+    name = "ConsoleClientName"
     try:
-        client = Client(name=name)
+        client = Client(name=name, force_console=True)
     except Exception as e:
         print(e)
         exit()

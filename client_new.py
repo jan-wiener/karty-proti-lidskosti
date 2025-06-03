@@ -3,39 +3,54 @@ import json
 import struct
 import uuid
 import threading
+import time
+import sys
 
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QPushButton,
-    QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QApplication, QWidget, QPushButton, QVBoxLayout, QLineEdit, QPushButton, QLayout, QLayoutItem,
+    QLabel, QHBoxLayout, QGridLayout,
 )
-from PyQt6.QtGui import (
-    QIcon
-)
-from PyQt6.QtCore import QSize
-from PyQt6.QtCore import Qt, QTimer
-import sys
-
-
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout
-import sys
-
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
-#SERVER_IP = 'localhost'  # replace with IP
-#PORT = 12345
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 
 
 
 
+class TextInputPopup(QWidget):
+    text_submitted = pyqtSignal(str)  # Signal to emit the entered text
 
-# Import your custom widget
-# from scoreboard_widget import ScoreboardWidget
+    def __init__(self, prompt: str, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Input")
+        self.setFixedSize(300, 120)
+
+        layout = QVBoxLayout(self)
+
+        self.label = QLabel(prompt)
+        self.textbox = QLineEdit()
+        self.button = QPushButton("Submit")
+
+        layout.addWidget(self.label)
+        layout.addWidget(self.textbox)
+        layout.addWidget(self.button)
+
+        self.button.clicked.connect(self.submit)
+
+    def submit(self):
+        text = self.textbox.text()
+        self.text_submitted.emit(text)  # Emit the signal
+        self.close()
+
+
 
 class MainWindow(QWidget):
+
     def __init__(self):
         super().__init__()
+        self.previous_game_stage = -1
         self.client = Client(name="Honza", ui=self)
         self.setWindowTitle("Card Game")
-        self.setMinimumSize(600, 400)
+        self.setMinimumSize(750, 900)
         self.setStyleSheet("background-color: #343536;")
 
         layout = QVBoxLayout()
@@ -43,27 +58,36 @@ class MainWindow(QWidget):
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.tick)
-        self.timer.start(1000)
+        self.timer.start(100)
         print(f"--------")
         #-----------------------------------------------
-        self.scoreboard = QLabel("Score: --")
+        self.scoreboard = QLabel("Scores:\n")
+        self.scoreboard.setMargin(1)
+        self.scoreboard.setStyleSheet("""
+            QLabel {
+                font-size: 15px;
+                color: white;
+            }
+        """)
+        # self.scoreboard.setVisible(False)
 
         self.black_card_area = QHBoxLayout()
         self.black_card = QPushButton()
         self.black_card.setFixedSize(100,150)
         self.black_card_area.addWidget(self.black_card)
 
-        self.status_message = QLabel("Status")
+        self.status_message = QLabel("Waiting for game")
         self.status_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_message.setMargin(12)
         self.status_message.setStyleSheet("""
             QLabel {
-                font-size: 18px;
+                font-size: 30px;
                 color: white;
             }
             """)
         
         self.selected_label = QLabel("Selected Cards")
+        self.selected_label.setVisible(False)
         self.selected_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.selected_label.setMargin(8)
         self.selected_label.setStyleSheet("""
@@ -73,6 +97,7 @@ class MainWindow(QWidget):
             }
             """)
         self.no_selected = QLabel("-- No cards selected --")
+        self.no_selected.setVisible(False)
         self.no_selected.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.no_selected.setMargin(20)
         self.no_selected.setStyleSheet("""
@@ -83,6 +108,7 @@ class MainWindow(QWidget):
             """)
         
         self.no_cards_in_hand = QLabel("-- No cards in hand --")
+        self.no_cards_in_hand.setVisible(False)
         self.no_cards_in_hand.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.no_cards_in_hand.setMargin(20)
         self.no_cards_in_hand.setStyleSheet("""
@@ -93,6 +119,7 @@ class MainWindow(QWidget):
             """)
         
         self.hand_label = QLabel("Your cards")
+        self.hand_label.setVisible(False)
         self.hand_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hand_label.setMargin(8)
         self.hand_label.setStyleSheet("""
@@ -124,8 +151,9 @@ class MainWindow(QWidget):
 
 
 
-        layout.addWidget(self.scoreboard)
+        
         layout.addLayout(self.black_card_area)
+        layout.addWidget(self.scoreboard)
         layout.addWidget(self.status_message)
         layout.addWidget(self.selected_label)
         layout.addWidget(self.no_selected)
@@ -150,19 +178,47 @@ class MainWindow(QWidget):
                 background-color: black;
             }
             """)
+        self.logged = False
 
-        self.hand = {0: {"text": "the black ones the black ones the black ones", "custom_text": ""}, 1: {"text": "Chuck Norris", "custom_text": ""}}
-        self.set_cards(self.hand)
+        self.hand = {0:0} #cant be {}
+        self.scores = {}
+        # self.hand = {0: {"text": "testing white card", "custom_text": ""}, 1: {"text": "testing white card2222222", "custom_text": ""}}
+        # self.set_cards(self.hand)
 
-        self.current_black_card = {"text": "I hate ____"}
+        self.current_black_card = {"text": "Waiting for game"}
         self.set_black_card(self.current_black_card)
+
+        
         # Later, you could call:
 
 
         self.setLayout(layout)
 
-    def update_scoreboard(self):
-        pass
+        
+
+    def update_scoreboard(self, scoreboard, uuids):
+        print("-*-----*--*-*-*-*-*-*-*")
+        print(scoreboard)
+        print(uuids)
+        # player_score_dict = {uuids[uuid]:scoreboard[uuid] for uuid in uuids}
+        player_score_dict = {}
+        for uuid, playername, score in zip(uuids.keys(), uuids.values(), scoreboard.values()):
+            if playername in player_score_dict.keys():
+                newplayername = playername
+                i = 1
+                while newplayername in player_score_dict.keys() and (i := i+1):
+                    newplayername = playername
+                    newplayername += str(i)
+                playername = newplayername
+            player_score_dict[playername] = score
+
+        print(player_score_dict)
+        text = "Score:\n"
+        for player, score in player_score_dict.items():
+            text += f"{player}: {score}\n"
+        self.scoreboard.setText(text)
+        
+
     
     @staticmethod
     def format_card_text(text):
@@ -194,16 +250,17 @@ class MainWindow(QWidget):
 
 
         elif self.client.game_stage == 2:
-            self.selected_cards[card.objectName()] = card
             cards = self.rate_cards.pop(card.objectName())
+            self.selected_cards[card.objectName()] = cards
+            # self.hand[int(card.objectName())]
             for ncardid in cards:
-                for ncard in cards[ncardid]:
-                    ncard.setParent(None)
-                    self.selected_card_area.addWidget(ncard)
+                ncard = cards[ncardid]
+                ncard.setParent(None)
+                self.selected_card_area.addWidget(ncard)
 
-                    ncard.clicked.disconnect()
-                    ncard.clicked.connect(lambda: self.deselect_card(card))
-        self.tick()
+                ncard.clicked.disconnect()
+                ncard.clicked.connect(lambda: self.deselect_card(card))
+        # self.tick()
             
 
 
@@ -226,15 +283,19 @@ class MainWindow(QWidget):
             cards = self.selected_cards.pop(card.objectName())
             self.rate_cards[card.objectName()] = cards
             for ncardid in cards:
-                for ncard in cards[ncardid]:
-                    ncard.setParent(None)
-                    self.rate_card_area.addWidget(card)
+                ncard = cards[ncardid]
+                ncard.setParent(None)
+                ncard.deleteLater()
 
-                    ncard.clicked.disconnect()
-                    ncard.clicked.connect(lambda: self.select_card(card))
-                    print(self.white_cards)
+                
+                # self.rate_card_area.addWidget(card)
+                # ncard.clicked.disconnect()
+                # ncard.clicked.connect(lambda: self.select_card(card))
 
-        self.tick()
+                print(self.white_cards)
+            self.set_rate_cards(self.hand, connect=self.client.is_tsar, reactive=self.client.is_tsar)
+
+        # self.tick()
 
 
 
@@ -298,26 +359,46 @@ class MainWindow(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
     
+    
+
+    def clear_grid_layout(self, grid_layout):
+        if not isinstance(grid_layout, QLayout):
+            return
+
+        while grid_layout.count():
+            item = grid_layout.takeAt(0)
+
+            if item.widget():
+                item.widget().setParent(None)
+            elif item.layout():
+                self.clear_grid_layout(item.layout())  
+
+            del item  
+
+    
 
     def set_rate_cards(self, cards, reactive = True, connect = True):
-        self.clear_layout(self.rate_card_area) # ------------------------------Change, might not work
+
+        self.clear_grid_layout(self.rate_card_area)
+        print(f"---------------------------setting rate cards")
 
         self.rate_cards = {}
         for player_index in cards:
+            dictname = f"{player_index}"
+            self.rate_cards[dictname] = {}
             for cardid in cards[player_index]:
                 card = cards[player_index][cardid]
 
                 cardui = QPushButton()
-                cardui.setObjectName(f"{player_index}")
+                cardui.setObjectName(dictname)
 
-                self.rate_cards[cardui.objectName()] = cardui
+                self.rate_cards[dictname][cardid] = cardui
 
                 if connect:
-                    cardui.setText(self.format_card_text(card["text"]))#cards[i]["text"]
                     cardui.clicked.connect(lambda _, crd = cardui: self.select_card(crd))
 
 
-
+                cardui.setText(self.format_card_text(card["text"]))#cards[i]["text"]
                 cardui.setFixedSize(100,150)    
                 if reactive:
                     cardui.setStyleSheet("""
@@ -347,54 +428,136 @@ class MainWindow(QWidget):
                         background-color: white;
                     }
                     """)
-                self.rate_card_area.addWidget(cardui, cardid, player_index)
+                self.rate_card_area.addWidget(cardui, int(cardid), int(player_index))
 
 
-                # self.rate_card_area.addWidget(cardui)
+    def change_status(self, message):
+        self.status_message.setText(message)
 
     def tick(self):
-        print("Tick")
+        # print("Tick")
+        
         if not len(self.selected_cards):
-            self.no_selected.setVisible(True)
+            self.no_selected.setVisible(True if (not self.client.is_tsar and self.client.game_stage == 1) or (self.client.is_tsar and self.client.game_stage == 2) else False)
             self.send_button.setVisible(False)
         else:
             self.no_selected.setVisible(False)
             self.send_button.setVisible(True)
 
         if not len(self.white_cards):
-            self.no_cards_in_hand.setVisible(True)
+            self.no_cards_in_hand.setVisible(True if (not self.client.is_tsar and self.client.game_stage == 1) else False)
         else:
             self.no_cards_in_hand.setVisible(False)
 
+
         
         #--Client
-        if self.client.hand != self.hand and self.client.game_stage == 1:
-            self.selected_cards = {}
-            self.hand = self.client.hand
-            self.set_cards(self.hand, connect=not self.client.is_tsar, reactive=not self.client.is_tsar)
-        elif self.client.hand != self.hand and self.client.game_stage == 2:
-            self.selected_cards = {}
-            self.set_cards({}, False, False)
-            self.hand = self.client.cards_indexed
-            self.set_rate_cards(self.hand, connect=self.client.is_tsar, reactive=self.client.is_tsar)
+
+        if self.client.connected and not self.logged:
+            self.logged = True
+            self.change_status("Game server found!\nWaiting for the game to start!")
         
+
+        if self.client.hand != self.hand and self.client.game_stage == 1:
+            print(f"Game Stage: {self.client.game_stage}")
+            if self.client.is_tsar:
+                self.change_status("You are the tsar\nWait for the others' turn!")
+                self.selected_label.setVisible(False)
+                self.hand_label.setVisible(False)
+            else:
+                self.change_status(f"Pick {self.client.answers} cards!")
+                self.selected_label.setVisible(True)
+                self.hand_label.setVisible(True)
+
+
+            self.hand = self.client.hand
+
+            self.clear_layout(self.white_card_area)
+            self.clear_layout(self.selected_card_area)
+            self.clear_grid_layout(self.rate_card_area)
+
+            self.selected_cards = {}
+
+            self.set_cards(self.hand, connect=not self.client.is_tsar, reactive=not self.client.is_tsar)
+
+        elif (self.client.cards_indexed != self.hand or self.previous_game_stage != self.client.game_stage) and self.client.game_stage == 2:
+            print(f"Game Stage: {self.client.game_stage}")
+            if self.client.is_tsar:
+                self.change_status(f"You are the tsar\nPick the best combo! ({self.client.answers} cards)")
+                self.selected_label.setVisible(True)
+                self.hand_label.setVisible(True)
+            else:
+                self.change_status(f"Wait for the tsar to pick a card!")
+                self.selected_label.setVisible(False)
+                self.hand_label.setVisible(False)
+            self.hand = self.client.cards_indexed
+
+            self.clear_layout(self.white_card_area)
+            self.clear_layout(self.selected_card_area)
+
+            self.selected_cards = {}
+            
+            self.set_rate_cards(self.hand, connect=self.client.is_tsar, reactive=self.client.is_tsar)
+
+
+        if self.client.scores != self.scores:
+            self.scores = self.client.scores
+            self.update_scoreboard(self.client.scores, self.client.uuids)
+        
+
         if self.current_black_card != self.client.current_black_card:
             self.current_black_card = self.client.current_black_card
             self.set_black_card(self.current_black_card)
-        
+
+
+        if self.client.winner:
+            self.change_status(f"Player {self.client.winner} won the game!")
+            self.client.winner = None
+
+        self.previous_game_stage = self.client.game_stage
         
         
 
 
+    def fill(self, cards, index=None, text=""):
+
+        if text:
+            cards[index]["text"] = text
+        for card in enumerate(cards):
+            if not card[1]["text"]:
+                self.popup = TextInputPopup(f"Fill text for card {card[0]}")
+                self.popup.text_submitted.connect(lambda text, cards=cards, index=card[0]: self.fill(cards, index, text))
+                self.popup.show()
+                return
+        self.client.submit_white(cards)
 
 
     def submit_action(self):
-        #
+
         if self.client.game_stage == 1:
             cards = [self.hand[int(i)] for i in self.selected_cards]
+            for card in cards:
+                if not card["text"]:
+                    self.fill(cards)
+                    return
+
             self.client.submit_white(cards)
         elif self.client.game_stage == 2:
-            self.client.submit_rate(self.client.uuiddict[list(self.selected_cards.keys())[0]])
+            self.client.submit_rate(self.client.uuiddict[int(list(self.selected_cards.keys())[0])])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -414,10 +577,14 @@ class Client(): #AI
 
     handlers = {}
     def __init__(self, name, ui, SERVER_IP = "localhost", PORT = 12345, autostart = True, force_console = False):
+        self.scores = {}
+        self.uuids = {}
+        self.winner = None
+        self.cards_indexed = {}
         self.uuiddict = {}
         self.game_stage = 0 # 0 = before login, 1 = round, 2 = rating, 3 = round end, 4 = game end
         self.is_tsar = False
-        self.current_black_card = {"text": "I hate ____"}
+        self.current_black_card = {"text": "Waiting for game"}
         self.answers = 1
         self.hand = {0: {"text": "the black ones the black ones the black ones", "custom_text": ""}, 1: {"text": "Chuck Norris", "custom_text": ""}} #testing hdand
         self.ui = ui
@@ -461,7 +628,15 @@ class Client(): #AI
 
     def client_start(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as self.sock:
-            self.sock.connect((self.SERVER_IP, self.PORT))
+            while True:
+                try:
+                    self.sock.connect((self.SERVER_IP, self.PORT))
+                except:
+                    print("Server not found, reconnecting in 2s")
+                    time.sleep(2)
+                    continue
+                break
+
             self.connected = True
             print("Connected to server!")
 
@@ -524,9 +699,12 @@ class Client(): #AI
         self.game_stage = 1
         self.current_black_card = data["black"]
         self.answers = self.current_black_card["answers"]
+        self.scores = data["scoreboard"]
+        self.uuids = data["uuids"]
         print(f"Current black card: {self.current_black_card["text"]}")
         if data["tsar"]:
             self.is_tsar = True
+            self.hand = {}
             print(f"You are the TSAR")
         else:
             self.is_tsar = False
@@ -550,7 +728,7 @@ class Client(): #AI
                 if not picked["text"]:
                     picked["text"] = input("Enter card text: ")
 
-                crds.append({"uuid": picked["uuid"], "custom_text": picked["text"]})
+                crds.append({"uuid": picked["uuid"], "text": picked["text"]})
             self.submit_white(crds)
 
         #for i in range(len(cards)):
@@ -624,7 +802,7 @@ class Client(): #AI
 
 
     
-    def submit_white(self, cards): # cards = [{"uuid": uuid, "custom_text": custom_text}]
+    def submit_white(self, cards): # cards = [{"uuid": uuid, "text": custom_text}]
         data = {"cards": {i: v for i,v in enumerate(cards)}}
         self.send_packet({"type": "submit_white", "data": data})
         #self.send_packet({"type": "submit_white", "data": {"uuid": carduuid, "custom_text": custom_text}})
