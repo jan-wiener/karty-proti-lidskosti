@@ -27,11 +27,6 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 
 
-
-
-
-
-
 # Import your custom widget
 # from scoreboard_widget import ScoreboardWidget
 
@@ -113,6 +108,8 @@ class MainWindow(QWidget):
         self.white_card_area = QHBoxLayout()
         self.white_cards = []
 
+        self.rate_card_area = QGridLayout()
+
         self.send_button = QPushButton("Send")
         self.send_button.setFixedSize(150,80)
         self.send_button.setStyleSheet("""
@@ -136,7 +133,8 @@ class MainWindow(QWidget):
         layout.addWidget(self.hand_label)
         layout.addLayout(self.white_card_area)
         layout.addWidget(self.no_cards_in_hand)
-        layout.addWidget(self.status_message)
+        #layout.addWidget(self.status_message)
+        layout.addLayout(self.rate_card_area)
         layout.addWidget(self.send_button, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self.black_card.setStyleSheet("""
@@ -184,36 +182,63 @@ class MainWindow(QWidget):
     def select_card(self, card):
         if len(self.selected_cards) >= self.client.answers: return
         
-        self.selected_cards[card.objectName()] = card
-        self.white_cards.pop(card.objectName())
-        card.setParent(None)
-        self.selected_card_area.addWidget(card)
+        if self.client.game_stage == 1:
+            self.selected_cards[card.objectName()] = card
+            self.white_cards.pop(card.objectName())
+            card.setParent(None)
+            self.selected_card_area.addWidget(card)
 
-        card.clicked.disconnect()
-        card.clicked.connect(lambda: self.deselect_card(card))
-        print(self.white_cards)
+            card.clicked.disconnect()
+            card.clicked.connect(lambda: self.deselect_card(card))
+            print(self.white_cards)
 
+
+        elif self.client.game_stage == 2:
+            self.selected_cards[card.objectName()] = card
+            cards = self.rate_cards.pop(card.objectName())
+            for ncardid in cards:
+                for ncard in cards[ncardid]:
+                    ncard.setParent(None)
+                    self.selected_card_area.addWidget(ncard)
+
+                    ncard.clicked.disconnect()
+                    ncard.clicked.connect(lambda: self.deselect_card(card))
         self.tick()
+            
+
 
 
 
     def deselect_card(self, card):
         
-        self.white_cards[card.objectName()] = card
-        self.selected_cards.pop(card.objectName())
-        card.setParent(None)
-        self.white_card_area.addWidget(card)
+        if self.client.game_stage == 1:
+            self.white_cards[card.objectName()] = card
+            self.selected_cards.pop(card.objectName())
+            card.setParent(None)
+            self.white_card_area.addWidget(card)
 
-        card.clicked.disconnect()
-        card.clicked.connect(lambda: self.select_card(card))
-        print(self.white_cards)
+            card.clicked.disconnect()
+            card.clicked.connect(lambda: self.select_card(card))
+            print(self.white_cards)
+
+
+        elif self.client.game_stage == 2:
+            cards = self.selected_cards.pop(card.objectName())
+            self.rate_cards[card.objectName()] = cards
+            for ncardid in cards:
+                for ncard in cards[ncardid]:
+                    ncard.setParent(None)
+                    self.rate_card_area.addWidget(card)
+
+                    ncard.clicked.disconnect()
+                    ncard.clicked.connect(lambda: self.select_card(card))
+                    print(self.white_cards)
 
         self.tick()
 
 
 
-
-    def set_cards(self, cards):
+    def set_cards(self, cards, reactive = True, connect = True):
         self.clear_layout(self.white_card_area)
 
         self.white_cards = {}
@@ -223,25 +248,42 @@ class MainWindow(QWidget):
 
             self.white_cards[cardui.objectName()] = cardui
             
-            cardui.setText(self.format_card_text(cards[i]["text"]))#cards[i]["text"]
-            cardui.clicked.connect(lambda _, crd = cardui: self.select_card(crd))
+            if connect:
+                cardui.setText(self.format_card_text(cards[i]["text"]))#cards[i]["text"]
+                cardui.clicked.connect(lambda _, crd = cardui: self.select_card(crd))
 
 
             
             cardui.setFixedSize(100,150)    
-            cardui.setStyleSheet("""
-            QPushButton {
-                background-color: white;
-                border: 2px solid black;
-                border-radius: 10px;
-                font-size: 12px;
-                color: black;
-                                 
-            }
-            QPushButton:hover {
-                background-color: lightgray;
-            }
-            """)
+            if reactive:
+                cardui.setStyleSheet("""
+                QPushButton {
+                    background-color: white;
+                    border: 2px solid black;
+                    border-radius: 10px;
+                    font-size: 12px;
+                    color: black;
+
+                }
+                QPushButton:hover {
+                    background-color: lightgray;
+                }
+                """)
+            else:
+                cardui.setStyleSheet("""
+                QPushButton {
+                    background-color: white;
+                    border: 2px solid black;
+                    border-radius: 10px;
+                    font-size: 12px;
+                    color: black;
+
+                }
+                QPushButton:hover {
+                    background-color: white;
+                }
+                """)
+
             self.white_card_area.addWidget(cardui)
         
 
@@ -254,8 +296,62 @@ class MainWindow(QWidget):
             widget = item.widget()
             if widget is not None:
                 widget.setParent(None)
-                widget.deleteLater()   
+                widget.deleteLater()
     
+
+    def set_rate_cards(self, cards, reactive = True, connect = True):
+        self.clear_layout(self.rate_card_area) # ------------------------------Change, might not work
+
+        self.rate_cards = {}
+        for player_index in cards:
+            for cardid in cards[player_index]:
+                card = cards[player_index][cardid]
+
+                cardui = QPushButton()
+                cardui.setObjectName(f"{player_index}")
+
+                self.rate_cards[cardui.objectName()] = cardui
+
+                if connect:
+                    cardui.setText(self.format_card_text(card["text"]))#cards[i]["text"]
+                    cardui.clicked.connect(lambda _, crd = cardui: self.select_card(crd))
+
+
+
+                cardui.setFixedSize(100,150)    
+                if reactive:
+                    cardui.setStyleSheet("""
+                    QPushButton {
+                        background-color: white;
+                        border: 2px solid black;
+                        border-radius: 10px;
+                        font-size: 12px;
+                        color: black;
+
+                    }
+                    QPushButton:hover {
+                        background-color: lightgray;
+                    }
+                    """)
+                else:
+                    cardui.setStyleSheet("""
+                    QPushButton {
+                        background-color: white;
+                        border: 2px solid black;
+                        border-radius: 10px;
+                        font-size: 12px;
+                        color: black;
+
+                    }
+                    QPushButton:hover {
+                        background-color: white;
+                    }
+                    """)
+                self.rate_card_area.addWidget(cardui, cardid, player_index)
+
+
+                # self.rate_card_area.addWidget(cardui)
+
     def tick(self):
         print("Tick")
         if not len(self.selected_cards):
@@ -272,9 +368,15 @@ class MainWindow(QWidget):
 
         
         #--Client
-        if self.client.hand != self.hand:
+        if self.client.hand != self.hand and self.client.game_stage == 1:
+            self.selected_cards = {}
             self.hand = self.client.hand
-            self.set_cards(self.hand)
+            self.set_cards(self.hand, connect=not self.client.is_tsar, reactive=not self.client.is_tsar)
+        elif self.client.hand != self.hand and self.client.game_stage == 2:
+            self.selected_cards = {}
+            self.set_cards({}, False, False)
+            self.hand = self.client.cards_indexed
+            self.set_rate_cards(self.hand, connect=self.client.is_tsar, reactive=self.client.is_tsar)
         
         if self.current_black_card != self.client.current_black_card:
             self.current_black_card = self.client.current_black_card
@@ -288,8 +390,11 @@ class MainWindow(QWidget):
 
     def submit_action(self):
         #
-        cards = [self.hand[int(i)] for i in self.selected_cards]
-        self.client.submit_white(cards)
+        if self.client.game_stage == 1:
+            cards = [self.hand[int(i)] for i in self.selected_cards]
+            self.client.submit_white(cards)
+        elif self.client.game_stage == 2:
+            self.client.submit_rate(self.client.uuiddict[list(self.selected_cards.keys())[0]])
 
 
 
@@ -309,6 +414,9 @@ class Client(): #AI
 
     handlers = {}
     def __init__(self, name, ui, SERVER_IP = "localhost", PORT = 12345, autostart = True, force_console = False):
+        self.uuiddict = {}
+        self.game_stage = 0 # 0 = before login, 1 = round, 2 = rating, 3 = round end, 4 = game end
+        self.is_tsar = False
         self.current_black_card = {"text": "I hate ____"}
         self.answers = 1
         self.hand = {0: {"text": "the black ones the black ones the black ones", "custom_text": ""}, 1: {"text": "Chuck Norris", "custom_text": ""}} #testing hdand
@@ -412,6 +520,8 @@ class Client(): #AI
     
     @packet_handler("round_info")
     def recv_round_info(self, data):
+        self.is_tsar = False
+        self.game_stage = 1
         self.current_black_card = data["black"]
         self.answers = self.current_black_card["answers"]
         print(f"Current black card: {self.current_black_card["text"]}")
@@ -449,6 +559,7 @@ class Client(): #AI
     
     @packet_handler("rate_info")
     def recv_rate_info(self, data):
+        self.game_stage = 2
         # cards = data
         # self.cards_to_rate = {i: cards[i] for i in range(len(cards))}
         self.cards_to_rate = data
@@ -483,6 +594,7 @@ class Client(): #AI
 
     @packet_handler("round_winner")
     def recv_round_winner(self, data):
+        self.game_stage = 3
         self.round_winner = data["winner"]
         self.round_winner_uuid = data["uuid"]
         # self.winning_card = data["card"]
@@ -493,6 +605,7 @@ class Client(): #AI
     
     @packet_handler("game_end")
     def recv_game_end(self, data):
+        self.game_stage = 4
         self.winner = data["winner"]
 
         # ------------------------------------Terminal access
