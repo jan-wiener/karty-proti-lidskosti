@@ -45,10 +45,11 @@ class TextInputPopup(QWidget):
 
 class MainWindow(QWidget):
 
-    def __init__(self):
+    def __init__(self, name = "Honza"):
         super().__init__()
         self.previous_game_stage = -1
-        self.client = Client(name="Honza", ui=self)
+        self.name = name
+        self.client = Client(name=self.name, ui=self)
         self.setWindowTitle("Card Game")
         self.setMinimumSize(750, 900)
         self.setStyleSheet("background-color: #343536;")
@@ -452,6 +453,17 @@ class MainWindow(QWidget):
 
         
         #--Client
+        if not self.client.connected and self.logged:
+            self.logged = False
+            self.change_status("Game server connection broken.\nTrying to reconnect..")
+            self.clear_layout(self.white_card_area)
+            self.clear_layout(self.selected_card_area)
+            self.clear_grid_layout(self.rate_card_area)
+            self.selected_label.setVisible(False)
+            self.hand_label.setVisible(False)
+            self.hand = {}
+
+            self.client.__init__(name=self.name, ui=self)
 
         if self.client.connected and not self.logged:
             self.logged = True
@@ -592,7 +604,12 @@ class Client(): #AI
         self.SERVER_IP = SERVER_IP
         self.PORT = PORT
         self.name= name
-        self._register_handlers()
+
+        self.once = False
+        if not self.once:
+            self._register_handlers()
+            self.once = True
+
         self.connected = False
 
         if autostart:
@@ -650,22 +667,22 @@ class Client(): #AI
             self.log_in()
 
             while True:
-                # try:
-                packet = self.recv_packet(self.sock)
-                if packet:
-                    print("Received:", packet)
-                    self.last_packet = packet
-                    packet_type = packet["type"]
-                    data = packet["data"]
-                    if handler := self.handlers[packet_type]:
-                        handler(data)
-                else:
-                    print("Server closed the connection.")
-                    break
-                # except Exception as e:
-                #     self.connected = False
-                #     print("Error:", e)
-                #     break        
+                try:
+                    packet = self.recv_packet(self.sock)
+                    if packet:
+                        print("Received:", packet)
+                        self.last_packet = packet
+                        packet_type = packet["type"]
+                        data = packet["data"]
+                        if handler := self.handlers[packet_type]:
+                            handler(data)
+                    else:
+                        print("Server closed the connection.")
+                        break
+                except Exception as e:
+                    self.connected = False
+                    print("Error:", e)
+                    break        
 
     
     def packet_handler(packet_type):

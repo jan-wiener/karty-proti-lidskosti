@@ -243,8 +243,6 @@ class MainWindow(QWidget):
 
 
 
-#client = Client(name="Honza")
-
 
 app = QApplication(sys.argv)
 window = MainWindow()
