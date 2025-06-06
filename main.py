@@ -79,6 +79,8 @@ class Server(): #AI
         self.PORT = port
 
         self.submitted_cards = {}
+        self.tsar = None
+        self.stage = 0
 
         if autostart:
             conn_init_thread = threading.Thread(target=self.start_server, daemon=True)
@@ -158,12 +160,13 @@ class Server(): #AI
         self.players.pop(player.uuid, 0)
         self.scoreboard.pop(player.uuid, 0)
         self.submitted_cards.pop(player.uuid, 0)
+        if player is self.tsar: 
+            self.tsar = None
         print(global_addr_db)
         # global_addr_db.pop(player.addr)
         # del player
     
     
-
 
     def start_server(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
@@ -318,7 +321,10 @@ class Server(): #AI
             for i in range(self.max_cards-len(player.hand)):
                 self.give_card(player=player)
 
-            self.broadcast_round_info()
+            if self.stage == 1:
+                self.broadcast_round_info()
+            elif self.stage == 2:
+                self.broadcast_rate_info()
 
 
 
@@ -336,6 +342,7 @@ class Server(): #AI
         card_data = data["cards"]
         player = global_addr_db[addr]
         card_dict = {}
+        successful = True
         for i in card_data:
             card = global_card_db[card_data[i]["uuid"]]
             card_dict[i] = card
@@ -344,18 +351,29 @@ class Server(): #AI
 
             if card not in player.hand or player.played_move or player is self.tsar: 
                 print(f"NOT FATAL: Can't submit card, stolen card: {card not in player.hand}, has played: {player.played_move}, is tsar: {self.tsar == player}")
-                return None
+                successful = False
+                break
 
 
             if not card.text:
                 card.text = custom_text
-
-
             
             player.hand.remove(card)
             print(f"player {player.name} submitted card {card.text}")
-        player.played_move = True
-        self.submitted_cards[player.uuid] = card_dict
+        
+        if successful:
+            player.played_move = True
+            self.submitted_cards[player.uuid] = card_dict
+        else:
+            print("NOT FATAL: card mismatch/cheating")
+        
+        self.submit_white_feedback(conn=conn, is_success=successful)
+
+
+
+    def submit_white_feedback(self, conn, is_success: True):
+        self.send_packet(conn, {"type": "round_rate_feedback", "data": {"status": is_success}})
+
 
 
 
@@ -430,7 +448,7 @@ class Server(): #AI
 
     def round(self):
         self.rounds = self.rounds + 1
-
+        self.stage = 1 #round
 
         # ----------------------------------------------------TSAR PICK
         #print([i.name for i in list(self.players.values())])
@@ -439,7 +457,7 @@ class Server(): #AI
             self.tsar = list(self.players.values())[list(self.players.values()).index(self.tsar)+1 if list(self.players.values()).index(self.tsar)+1 < len(self.players) else 0]
         except Exception as e:
             print(e)
-            self.tsar = self.players.values()[0]
+            self.tsar = list(self.players.values())[0]
         self.current_black_card = random.choice(self.black_cards)
 
         # ----------------------------------------------------GIVE CARDS
@@ -457,19 +475,16 @@ class Server(): #AI
 
         self.submitted_cards = {} # player: card
 
-
-
         print(f"awaiting Cards")
 
 
-        while len(self.submitted_cards) < len(self.players)-1: #-1 for tsar
-            if len(self.players) < 2: raise Exception("player left")
+        while len(self.submitted_cards) < len(self.players)-1 or len(self.players) < 2: #-1 for tsar
+            if len(self.players) < 2: print("ALERT: GAME PAUSED, not enough players")
+            if not self.tsar: 
+                self.tsar = list(self.players.values())[0]
+                self.broadcast_round_info()
+
             time.sleep(1)
-
-        if len(self.players) < 2: raise Exception("Not enough players")
-
-
-
 
 
         # ----------------------------------------------------RATE PHASE
@@ -477,8 +492,9 @@ class Server(): #AI
         print(self.submitted_cards)
 
 
-        self.broadcast_rate_info() #--------------- call TCP
 
+        self.broadcast_rate_info() #--------------- call TCP
+        self.stage = 2# rating
 
 
 
@@ -486,20 +502,25 @@ class Server(): #AI
         self.round_winner = None #placeholder
         print(f"awating Rating, ")
         while not self.round_winner:
-            if len(self.players) < 2: raise Exception("player left")
+            if not self.tsar or len(self.players) < 2: 
+                try:
+                    self.tsar = list(self.players.values())[0]
+                except:
+                    pass
+                finally:
+                    break
             time.sleep(1)
 
+        self.stage = 3 #round end
 
+        if self.round_winner:
+            # ----------------------------------------------------ANNOUNCE ROUND WINNERS
+            print(f"{self.round_winner.name} won this round")
+            print(f"broadcasting round winner")
 
-
-
-        # ----------------------------------------------------ANNOUNCE ROUND WINNERS
-        print(f"{self.round_winner.name} won this round")
-        print(f"broadcasting round winner")
-
-
-
-        self.broadcast({"type": "round_winner", "data": {"winner": self.round_winner.name, "uuid": self.round_winner.uuid}}) 
+            self.broadcast({"type": "round_winner", "data": {"winner": self.round_winner.name, "uuid": self.round_winner.uuid}}) 
+        else:
+            print("skipping round")
 
 
 
@@ -513,6 +534,7 @@ class Server(): #AI
 
         # ---------------------------------------------------- CALL FOR WINNER
         if winner := self.get_winner():
+            self.stage = 3
             print(f"Player {winner.name} won the Game!\nbroadcasting game winner")
             self.broadcast({"type": "game_end", "data": {"winner": winner.name}})
             return winner

@@ -180,7 +180,9 @@ class MainWindow(QWidget):
             }
             """)
         self.logged = False
-
+        self.feedback = None
+        self.selected_for_rate = False
+        
         self.hand = {0:0} #cant be {}
         self.scores = {}
         # self.hand = {0: {"text": "testing white card", "custom_text": ""}, 1: {"text": "testing white card2222222", "custom_text": ""}}
@@ -250,7 +252,7 @@ class MainWindow(QWidget):
             print(self.white_cards)
 
 
-        elif self.client.game_stage == 2:
+        elif self.client.game_stage == 2 and not self.selected_cards:
             cards = self.rate_cards.pop(card.objectName())
             self.selected_cards[card.objectName()] = cards
             # self.hand[int(card.objectName())]
@@ -276,7 +278,7 @@ class MainWindow(QWidget):
             self.white_card_area.addWidget(card)
 
             card.clicked.disconnect()
-            card.clicked.connect(lambda: self.select_card(card))
+            card.clicked.connect(lambda crd = card: self.select_card(crd))
             print(self.white_cards)
 
 
@@ -379,7 +381,7 @@ class MainWindow(QWidget):
     
 
     def set_rate_cards(self, cards, reactive = True, connect = True):
-
+        self.selected_cards = {}
         self.clear_grid_layout(self.rate_card_area)
         print(f"---------------------------setting rate cards")
 
@@ -469,6 +471,16 @@ class MainWindow(QWidget):
             self.logged = True
             self.change_status("Game server found!\nWaiting for the game to start!")
         
+
+        
+        if self.client.feedback != self.feedback:
+            self.feedback = self.client.feedback
+            if self.feedback == True:
+                self.change_status("CARDS SUBMITTED")
+            elif self.feedback == False:
+                self.change_status("There was a server error..\n Trying to reset cards..")
+
+
 
         if self.client.hand != self.hand and self.client.game_stage == 1:
             print(f"Game Stage: {self.client.game_stage}")
@@ -589,6 +601,7 @@ class Client(): #AI
 
     handlers = {}
     def __init__(self, name, ui, SERVER_IP = "localhost", PORT = 12345, autostart = True, force_console = False):
+        self.feedback = None
         self.scores = {}
         self.uuids = {}
         self.winner = None
@@ -713,6 +726,7 @@ class Client(): #AI
     @packet_handler("round_info")
     def recv_round_info(self, data):
         self.is_tsar = False
+        self.feedback = None
         self.game_stage = 1
         self.current_black_card = data["black"]
         self.answers = self.current_black_card["answers"]
@@ -750,6 +764,12 @@ class Client(): #AI
 
         #for i in range(len(cards)):
         #    self.hand[i] = cards[i]
+    
+
+    @packet_handler("round_rate_feedback")
+    def recv_round_feedback(self, data):
+        self.feedback = data["status"]
+        print(self.feedback)
 
     
     @packet_handler("rate_info")
