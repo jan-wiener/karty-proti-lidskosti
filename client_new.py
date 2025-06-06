@@ -278,7 +278,7 @@ class MainWindow(QWidget):
             self.white_card_area.addWidget(card)
 
             card.clicked.disconnect()
-            card.clicked.connect(lambda crd = card: self.select_card(crd))
+            card.clicked.connect(lambda _, crd = card: self.select_card(crd))
             print(self.white_cards)
 
 
@@ -312,40 +312,68 @@ class MainWindow(QWidget):
 
             self.white_cards[cardui.objectName()] = cardui
             
-            if connect:
+            card_text = cards[i]["text"]
+            if card_text:
                 cardui.setText(self.format_card_text(cards[i]["text"]))#cards[i]["text"]
+            else:
+                cardui.setText("<Žolík>")#cards[i]["text"]
+
+                
+            if connect:
                 cardui.clicked.connect(lambda _, crd = cardui: self.select_card(crd))
 
 
             
             cardui.setFixedSize(100,150)    
             if reactive:
-                cardui.setStyleSheet("""
-                QPushButton {
-                    background-color: white;
-                    border: 2px solid black;
-                    border-radius: 10px;
-                    font-size: 12px;
-                    color: black;
+                if card_text:
+                    cardui.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: white;
+                        border: 2px solid black;
+                        border-radius: 10px;
+                        font-size: 12px;
+                        color: black;
 
-                }
-                QPushButton:hover {
-                    background-color: lightgray;
-                }
-                """)
+                    }}
+                    QPushButton:hover {{
+                        background-color: lightgray;
+                    }}
+                    """)
+                else:
+                    cardui.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: white;
+                                         
+                        background-image: url('stripes.png');
+                        background-repeat: no-repeat;
+                        background-position: center;
+                                         
+                        border: 2px solid black;
+                        border-radius: 10px;
+                        font-size: 12px;
+                        color: black;
+
+                    }}
+                    QPushButton:hover {{
+                        background-color: lightgray;
+                    }}
+                                         
+
+                    """)
             else:
-                cardui.setStyleSheet("""
-                QPushButton {
-                    background-color: white;
+                cardui.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {"white" if card_text else "yellow"};
                     border: 2px solid black;
                     border-radius: 10px;
                     font-size: 12px;
                     color: black;
 
-                }
-                QPushButton:hover {
+                }}
+                QPushButton:hover {{
                     background-color: white;
-                }
+                }}
                 """)
 
             self.white_card_area.addWidget(cardui)
