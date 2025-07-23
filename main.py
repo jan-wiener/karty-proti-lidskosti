@@ -181,7 +181,7 @@ class Server(): #AI
     
     # --------------
 
-
+    @staticmethod
     def packet_handler(packet_type):
         def decorator(func):
             func._packet_type = packet_type
@@ -371,7 +371,7 @@ class Server(): #AI
 
 
 
-    def submit_white_feedback(self, conn, is_success: True):
+    def submit_white_feedback(self, conn, is_success: bool = True):
         self.send_packet(conn, {"type": "round_rate_feedback", "data": {"status": is_success}})
 
 
@@ -405,7 +405,7 @@ class Server(): #AI
             print(F"NOT FATAL: player {sender.name} is not the tsar; OR it wasn't rating phase")
             return None
         elif not player:
-            raise "FATAL: Player not found"
+            raise BaseException("FATAL: Player not found")
 
         self.round_winner = player
         self.add_score(self.round_winner)
@@ -413,7 +413,7 @@ class Server(): #AI
         return player
     
     def broadcast_round_info(self): # can/should be made individual access, for client calls
-        data = {"scoreboard": self.scoreboard, "uuids": self.uuids}
+        data: dict  = {"scoreboard": self.scoreboard, "uuids": self.uuids}
 
         print(f"Broadcasting round info")
         for player in self.players.values(): 

@@ -13,8 +13,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 
 
-
-
 class TextInputPopup(QWidget):
     text_submitted = pyqtSignal(str)  # Signal to emit the entered text
 
@@ -397,10 +395,11 @@ class MainWindow(QWidget):
             return
 
         while grid_layout.count():
-            item = grid_layout.takeAt(0)
+            item: QLayoutItem | None = grid_layout.takeAt(0)
+            assert item is not None
 
-            if item.widget():
-                item.widget().setParent(None)
+            if widget := item.widget():
+                widget.setParent(None)
             elif item.layout():
                 self.clear_grid_layout(item.layout())  
 
@@ -588,7 +587,9 @@ class MainWindow(QWidget):
 
         if self.client.game_stage == 1:
             cards = [self.hand[int(i)] for i in self.selected_cards]
+            
             for card in cards:
+                assert type(card) == dict
                 if not card["text"]:
                     self.fill(cards)
                     return
@@ -725,7 +726,7 @@ class Client(): #AI
                     print("Error:", e)
                     break        
 
-    
+    @staticmethod
     def packet_handler(packet_type):
         def decorator(func):
             func._packet_type = packet_type
@@ -736,9 +737,9 @@ class Client(): #AI
         for attr_name in dir(self):
             method = getattr(self, attr_name)
             if callable(method) and hasattr(method, "_packet_type"):
-                self.handlers[method._packet_type] = method
+                self.handlers[method._packet_type] = method # type: ignore
 
-    
+
 
     # ----------------------
 
